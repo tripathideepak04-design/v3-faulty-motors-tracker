@@ -309,20 +309,37 @@ async function pushToSheets(rows) {
   if (!state.webhookUrl || !rows.length) return false;
   setWsStatus("pushing");
   try {
-    // Use no-cors to bypass CORS restriction on Apps Script
+    // Send as form-encoded so Apps Script receives it reliably under no-cors
+    const form = new FormData();
+    form.append("data", JSON.stringify({ rows }));
     await fetch(state.webhookUrl, {
       method: "POST",
       mode: "no-cors",
-      headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ rows })
+      body: form
     });
-    // no-cors means we can't read the response, but if no exception = success
     setWsStatus("success", `✓ ${rows.length} row(s) pushed to Sheet`);
     return true;
   } catch(err) {
     setWsStatus("error", "Push failed — check your webhook URL");
     return false;
   }
+}
+
+// ── Beep on successful scan ───────────────────────────────────────
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = "sine";
+    o.frequency.setValueAtTime(1046, ctx.currentTime);       // C6 - pleasant high note
+    o.frequency.setValueAtTime(1318, ctx.currentTime + 0.08); // E6 - quick up
+    g.gain.setValueAtTime(0.4, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+    o.start(ctx.currentTime);
+    o.stop(ctx.currentTime + 0.25);
+  } catch(e) {}
 }
 
 function setWsStatus(s, msg="") {
@@ -401,6 +418,7 @@ function scanFrame() {
     if (code.data!==lastCode || now-lastCodeTime>2000) {
       lastCode=code.data; lastCodeTime=now;
       const sr=document.getElementById("scan-result"); sr.textContent="✓ "+code.data; sr.style.display="block";
+      beep();
       addSerials(code.data);
     }
   }
