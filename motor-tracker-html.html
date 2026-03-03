@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>Motor Fault Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f9fafb; }
+  .pill { padding:4px 14px; border-radius:999px; font-size:13px; font-weight:500; border:1px solid #d1d5db; background:#fff; color:#4b5563; cursor:pointer; transition:all .15s; }
+  .pill.on { background:#111827; color:#fff; border-color:#111827; }
+  .badge { display:inline-flex; align-items:center; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; }
+  #toast { position:fixed; top:16px; left:50%; transform:translateX(-50%); padding:8px 20px; border-radius:999px; color:#fff; font-size:13px; font-weight:500; z-index:999; display:none; white-space:nowrap; }
+  .tab-btn { flex:1; padding:8px; font-size:12px; font-weight:600; border-radius:8px; border:none; background:transparent; color:#6b7280; cursor:pointer; transition:all .15s; }
+  .tab-btn.on { background:#fff; color:#111827; box-shadow:0 1px 3px rgba(0,0,0,.1); }
+  .card { background:#fff; border-radius:16px; border:1px solid #f3f4f6; box-shadow:0 1px 3px rgba(0,0,0,.04); padding:20px; margin-bottom:12px; }
+  textarea, input[type=text], input[type=url] { width:100%; border:1px solid #e5e7eb; border-radius:12px; padding:10px 14px; font-size:13px; outline:none; box-sizing:border-box; }
+  textarea:focus, input:focus { border-color:#111827; box-shadow:0 0 0 2px rgba(17,24,39,.1); }
+  .btn-primary { width:100%; padding:12px; background:#111827; color:#fff; border:none; border-radius:12px; font-size:14px; font-weight:600; cursor:pointer; }
+  .btn-primary:hover { background:#374151; }
+  .btn-primary:disabled { opacity:.3; cursor:not-allowed; }
+  .btn-outline { width:100%; padding:10px; background:#fff; color:#374151; border:1px solid #e5e7eb; border-radius:12px; font-size:13px; font-weight:600; cursor:pointer; }
+  #video-wrap { position:relative; border-radius:12px; overflow:hidden; background:#000; aspect-ratio:4/3; }
+  #video { width:100%; height:100%; object-fit:cover; display:block; }
+  #scan-overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
+  .corner { position:absolute; width:32px; height:32px; border:4px solid #fff; }
+  .tl { top:0; left:0; border-right:none; border-bottom:none; border-radius:8px 0 0 0; }
+  .tr { top:0; right:0; border-left:none; border-bottom:none; border-radius:0 8px 0 0; }
+  .bl { bottom:0; left:0; border-right:none; border-top:none; border-radius:0 0 0 8px; }
+  .br { bottom:0; right:0; border-left:none; border-top:none; border-radius:0 0 8px 0; }
+  #scan-result { position:absolute; bottom:8px; left:8px; right:8px; background:#22c55e; color:#fff; font-size:11px; padding:6px 12px; border-radius:8px; font-family:monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bar-wrap { flex:1; height:20px; background:#f3f4f6; border-radius:999px; overflow:hidden; }
+  .bar-fill { height:100%; border-radius:999px; transition:width .5s; }
+  svg.donut { transform:rotate(-90deg); }
+  .dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+</style>
+</head>
+<body>
+
+<div id="toast"></div>
+
+<div style="max-width:600px;margin:0 auto;padding:20px 16px 40px;">
+
+  <!-- Header -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+    <div>
+      <h1 style="font-size:20px;font-weight:800;color:#111827;margin:0;">Motor Fault Tracker</h1>
+      <p style="font-size:12px;color:#9ca3af;margin:4px 0 0;">Live push to Google Sheets</p>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div id="ws-badge" style="display:none;font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px;align-items:center;gap:6px;background:#f0fdf4;color:#16a34a;">
+        <span id="ws-dot" style="width:6px;height:6px;border-radius:50%;background:#22c55e;display:inline-block;"></span>
+        <span id="ws-label">Connected</span>
+      </div>
+      <div style="background:#111827;color:#fff;font-size:11px;font-weight:700;padding:6px 14px;border-radius:999px;" id="count-badge">0 logged</div>
+    </div>
+  </div>
+
+  <!-- Webhook status msg -->
+  <div id="wh-msg" style="display:none;margin-bottom:12px;padding:10px 16px;border-radius:12px;font-size:13px;font-weight:500;"></div>
+
+  <!-- Setup banner -->
+  <div id="setup-banner" class="card" style="background:#fffbeb;border-color:#fde68a;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;">
+    <div>
+      <p style="font-size:14px;font-weight:700;color:#92400e;margin:0;">⚡ Connect Google Sheets</p>
+      <p style="font-size:11px;color:#b45309;margin:4px 0 0;">2-min setup to push scans directly</p>
+    </div>
+    <button class="pill" onclick="toggleSetup()" id="setup-btn">Setup</button>
+  </div>
+
+  <!-- Setup guide -->
+  <div id="setup-panel" class="card" style="display:none;">
+    <h2 style="font-size:16px;font-weight:800;margin:0 0 16px;">Setup Guide — 2 minutes</h2>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px;">
+      <div style="display:flex;gap:10px;"><div style="width:24px;height:24px;border-radius:50%;background:#111827;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">1</div><div><p style="font-size:13px;font-weight:600;margin:0;">Open your Google Sheet</p><p style="font-size:12px;color:#6b7280;margin:3px 0 0;">Go to your target Google Sheet (create one if needed).</p></div></div>
+      <div style="display:flex;gap:10px;"><div style="width:24px;height:24px;border-radius:50%;background:#111827;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">2</div><div><p style="font-size:13px;font-weight:600;margin:0;">Open Apps Script editor</p><p style="font-size:12px;color:#6b7280;margin:3px 0 0;">Click Extensions → Apps Script in the top menu.</p></div></div>
+      <div style="display:flex;gap:10px;"><div style="width:24px;height:24px;border-radius:50%;background:#111827;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">3</div><div><p style="font-size:13px;font-weight:600;margin:0;">Paste the script & Save</p><p style="font-size:12px;color:#6b7280;margin:3px 0 0;">Delete existing code, paste below, click 💾.</p></div></div>
+      <div style="display:flex;gap:10px;"><div style="width:24px;height:24px;border-radius:50%;background:#111827;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">4</div><div><p style="font-size:13px;font-weight:600;margin:0;">Deploy as Web App</p><p style="font-size:12px;color:#6b7280;margin:3px 0 0;">Deploy → New deployment → Web App. Execute as: Me. Who has access: Anyone.</p></div></div>
+      <div style="display:flex;gap:10px;"><div style="width:24px;height:24px;border-radius:50%;background:#111827;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">5</div><div><p style="font-size:13px;font-weight:600;margin:0;">Paste the Web App URL below</p></div></div>
+    </div>
+    <div style="background:#0d1117;border-radius:12px;padding:14px;position:relative;margin-bottom:12px;">
+      <pre id="script-code" style="color:#4ade80;font-size:11px;margin:0;white-space:pre-wrap;line-height:1.6;overflow-x:auto;"></pre>
+      <button onclick="copyScript()" id="copy-btn" style="position:absolute;top:10px;right:10px;font-size:11px;padding:4px 10px;border-radius:8px;border:none;background:#374151;color:#e5e7eb;cursor:pointer;font-weight:600;">Copy</button>
+    </div>
+    <label style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;">Your Web App URL</label>
+    <input type="url" id="webhook-input" placeholder="https://script.google.com/macros/s/.../exec" style="margin-top:8px;" oninput="saveWebhook(this.value)"/>
+    <p id="wh-saved" style="display:none;font-size:12px;color:#16a34a;font-weight:600;margin:6px 0 0;">✓ Webhook saved!</p>
+    <button class="btn-primary" style="margin-top:12px;" onclick="toggleSetup()">Done — Start Scanning</button>
+  </div>
+
+  <!-- Tabs -->
+  <div style="display:flex;gap:4px;background:#f3f4f6;padding:4px;border-radius:12px;margin-bottom:14px;">
+    <button class="tab-btn on" id="tab-scan" onclick="switchTab('scan')">🔍 Scan</button>
+    <button class="tab-btn" id="tab-dashboard" onclick="switchTab('dashboard')">📊 Dashboard</button>
+    <button class="tab-btn" id="tab-entries" onclick="switchTab('entries')">📋 Entries (<span id="entry-count">0</span>)</button>
+  </div>
+
+  <!-- ═══ SCAN TAB ═══ -->
+  <div id="tab-scan-panel">
+    <div class="card">
+      <div id="config-section">
+        <div style="margin-bottom:14px;">
+          <label style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;">City</label>
+          <div id="city-pills" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;"></div>
+        </div>
+        <div style="margin-bottom:14px;">
+          <label style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;">Motor Type</label>
+          <div id="type-pills" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;"></div>
+        </div>
+        <div style="margin-bottom:14px;">
+          <label style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;">Location</label>
+          <div id="loc-pills" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;"></div>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;">Failure Reasons <span style="text-transform:none;font-weight:400;">(multi-select)</span></label>
+          <div id="fail-pills" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Camera -->
+    <div class="card" id="camera-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <label style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;">Camera QR Scanner</label>
+        <span id="auto-push-badge" style="display:none;font-size:11px;color:#16a34a;font-weight:600;">Auto-pushes ✓</span>
+      </div>
+      <div id="camera-inactive">
+        <button class="btn-primary" id="start-cam-btn" onclick="startCamera()">📷 Start Camera Scanner</button>
+      </div>
+      <div id="camera-active" style="display:none;">
+        <div id="video-wrap">
+          <video id="video" autoplay muted playsinline></video>
+          <canvas id="canvas" style="display:none;"></canvas>
+          <div id="scan-overlay">
+            <div style="width:192px;height:192px;position:relative;">
+              <div class="corner tl"></div><div class="corner tr"></div>
+              <div class="corner bl"></div><div class="corner br"></div>
+            </div>
+          </div>
+          <div id="scan-result" style="display:none;"></div>
+        </div>
+        <button class="btn-outline" style="margin-top:8px;color:#ef4444;border-color:#fecaca;" onclick="stopCamera()">Stop Camera</button>
+      </div>
+      <p id="cam-error" style="display:none;font-size:12px;color:#ef4444;margin-top:8px;text-align:center;"></p>
+    </div>
+
+    <!-- Manual input -->
+    <div class="card" id="manual-card">
+      <label style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;">Manual / Bulk Input</label>
+      <p style="font-size:12px;color:#9ca3af;margin:4px 0 10px;">Paste up to 200 serials — comma, semicolon or newline separated</p>
+      <textarea id="serial-input" rows="3" placeholder="Paste serial numbers here…" onkeydown="handleEnter(event)"></textarea>
+      <button class="btn-primary" style="margin-top:8px;" onclick="addSerialsFromInput()">Add & Push to Sheet</button>
+    </div>
+    <p id="config-hint" style="text-align:center;font-size:12px;color:#9ca3af;">↑ Select all options above to enable scanning</p>
+  </div>
+
+  <!-- ═══ DASHBOARD TAB ═══ -->
+  <div id="tab-dashboard-panel" style="display:none;">
+    <div id="dash-empty" style="text-align:center;padding:60px 0;color:#9ca3af;display:none;">
+      <div style="font-size:48px;margin-bottom:12px;">📊</div>
+      <p style="font-size:14px;">No data yet. Scan some motors first.</p>
+    </div>
+    <div id="dash-content">
+      <!-- KPIs -->
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px;">
+        <div style="background:#111827;color:#fff;border-radius:14px;padding:14px;"><div id="kpi-total" style="font-size:26px;font-weight:900;">0</div><div style="font-size:11px;opacity:.7;margin-top:4px;">Total Motors</div></div>
+        <div style="background:#16a34a;color:#fff;border-radius:14px;padding:14px;"><div id="kpi-pushed" style="font-size:26px;font-weight:900;">0</div><div style="font-size:11px;opacity:.7;margin-top:4px;">Pushed</div></div>
+        <div id="kpi-pending-card" style="background:#f3f4f6;color:#6b7280;border-radius:14px;padding:14px;"><div id="kpi-pending" style="font-size:26px;font-weight:900;">0</div><div style="font-size:11px;opacity:.7;margin-top:4px;">Pending</div></div>
+      </div>
+      <!-- Charts -->
+      <div class="card"><div id="chart-city"></div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+        <div class="card" style="padding:14px;"><div id="chart-type"></div></div>
+        <div class="card" style="padding:14px;"><div id="chart-loc"></div></div>
+      </div>
+      <div class="card"><div id="chart-fail"></div></div>
+      <div class="card" id="chart-combos" style="display:none;"></div>
+      <div class="card"><div id="chart-recent"></div></div>
+    </div>
+  </div>
+
+  <!-- ═══ ENTRIES TAB ═══ -->
+  <div id="tab-entries-panel" style="display:none;">
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div>
+          <p style="font-size:14px;font-weight:700;color:#111827;margin:0;">Sheet Sync</p>
+          <p id="sync-status" style="font-size:12px;color:#9ca3af;margin:3px 0 0;">No webhook connected</p>
+        </div>
+        <button id="push-all-btn" onclick="pushAll()" style="display:none;font-size:12px;font-weight:700;padding:8px 14px;background:#16a34a;color:#fff;border:none;border-radius:10px;cursor:pointer;">Push unpushed</button>
+      </div>
+      <button class="btn-outline" onclick="exportCSV()">↓ Download CSV</button>
+    </div>
+
+    <div id="entries-empty" style="text-align:center;padding:60px 0;color:#9ca3af;display:none;">
+      <div style="font-size:48px;margin-bottom:12px;">📭</div>
+      <p style="font-size:14px;">No entries yet.</p>
+    </div>
+
+    <div id="entries-list-wrap" class="card" style="display:none;padding:0;overflow:hidden;">
+      <div style="padding:12px 16px;border-bottom:1px solid #f9fafb;display:flex;align-items:center;justify-content:space-between;">
+        <span id="entries-count-label" style="font-size:13px;font-weight:700;color:#374151;"></span>
+        <button onclick="clearAll()" style="font-size:12px;color:#f87171;background:none;border:none;cursor:pointer;">Clear all</button>
+      </div>
+      <div id="entries-list" style="max-height:400px;overflow-y:auto;"></div>
+    </div>
+    <p style="text-align:center;font-size:11px;color:#9ca3af;margin-top:8px;">🟢 pushed · 🟡 pending</p>
+  </div>
+
+</div>
+
+<script>
+const CITIES = ["BLR","BOM","NCR","HYD","Central Refurb"];
+const MOTOR_TYPES = ["Solid","Pneumatic"];
+const LOCATIONS = ["YCs","Refurb","Inventory","Scrap"];
+const FAILURE_REASONS = ["Physical Damage","Electrical Failure","Noise","Thread Issue"];
+
+const CITY_CLR  = {BLR:"#3b82f6",BOM:"#a855f7",NCR:"#ca8a04",HYD:"#22c55e","Central Refurb":"#f97316"};
+const CITY_BADGE= {BLR:"background:#dbeafe;color:#1d4ed8",BOM:"background:#f3e8ff;color:#7e22ce",NCR:"background:#fef9c3;color:#854d0e",HYD:"background:#dcfce7;color:#15803d","Central Refurb":"background:#ffedd5;color:#c2410c"};
+const TYPE_BADGE= {Solid:"background:#f3f4f6;color:#374151",Pneumatic:"background:#cffafe;color:#0e7490"};
+const LOC_CLR   = {YCs:"#ec4899",Refurb:"#6366f1",Inventory:"#14b8a6",Scrap:"#ef4444"};
+const LOC_BADGE = {YCs:"background:#fce7f3;color:#9d174d",Refurb:"background:#e0e7ff;color:#3730a3",Inventory:"background:#ccfbf1;color:#0f766e",Scrap:"background:#fee2e2;color:#b91c1c"};
+const FAIL_CLR  = ["#ef4444","#3b82f6","#f59e0b","#8b5cf6"];
+
+const SCRIPT = `function doPost(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var data = JSON.parse(e.postData.contents);
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(["Serial Number","City","Motor Type","Location","Failure Reasons","Timestamp"]);
+    sheet.getRange(1,1,1,6).setFontWeight("bold").setBackground("#f3f4f6");
+  }
+  data.rows.forEach(function(row){
+    sheet.appendRow([row.serial,row.city,row.motorType,row.location,row.failures,row.timestamp]);
+  });
+  return ContentService.createTextOutput(JSON.stringify({success:true,added:data.rows.length}))
+    .setMimeType(ContentService.MimeType.JSON);
+}`;
+
+document.getElementById("script-code").textContent = SCRIPT;
+
+// ── State ─────────────────────────────────────────────────────────
+let state = { city:"", motorType:"", location:"", failures:[], entries:[], webhookUrl: localStorage.getItem("webhook_url")||"", webhookStatus:"idle" };
+let stream = null, rafId = null, lastCode = "", lastCodeTime = 0;
+
+// ── Init pills ────────────────────────────────────────────────────
+function makePills(containerId, items, key, multi=false) {
+  const el = document.getElementById(containerId);
+  items.forEach(item => {
+    const b = document.createElement("button");
+    b.className = "pill"; b.textContent = item;
+    b.onclick = () => {
+      if (multi) {
+        if (state.failures.includes(item)) state.failures = state.failures.filter(x=>x!==item);
+        else state.failures.push(item);
+      } else { state[key] = item; }
+      renderPills(); checkReady();
+    };
+    el.appendChild(b);
+  });
+}
+makePills("city-pills", CITIES, "city");
+makePills("type-pills", MOTOR_TYPES, "motorType");
+makePills("loc-pills", LOCATIONS, "location");
+makePills("fail-pills", FAILURE_REASONS, "failures", true);
+
+function renderPills() {
+  document.querySelectorAll("#city-pills .pill").forEach(b => b.classList.toggle("on", b.textContent===state.city));
+  document.querySelectorAll("#type-pills .pill").forEach(b => b.classList.toggle("on", b.textContent===state.motorType));
+  document.querySelectorAll("#loc-pills .pill").forEach(b => b.classList.toggle("on", b.textContent===state.location));
+  document.querySelectorAll("#fail-pills .pill").forEach(b => b.classList.toggle("on", state.failures.includes(b.textContent)));
+}
+
+function checkReady() {
+  const ready = state.city && state.motorType && state.location && state.failures.length > 0;
+  document.getElementById("camera-card").style.opacity = ready ? "1" : "0.4";
+  document.getElementById("camera-card").style.pointerEvents = ready ? "auto" : "none";
+  document.getElementById("manual-card").style.opacity = ready ? "1" : "0.4";
+  document.getElementById("manual-card").style.pointerEvents = ready ? "auto" : "none";
+  document.getElementById("config-hint").style.display = ready ? "none" : "block";
+}
+checkReady();
+
+// ── Webhook ───────────────────────────────────────────────────────
+function saveWebhook(val) {
+  state.webhookUrl = val;
+  localStorage.setItem("webhook_url", val);
+  document.getElementById("wh-saved").style.display = val ? "block" : "none";
+  updateWebhookUI();
+}
+
+function updateWebhookUI() {
+  const has = !!state.webhookUrl;
+  document.getElementById("setup-banner").style.display = has ? "none" : "flex";
+  const badge = document.getElementById("ws-badge");
+  badge.style.display = has ? "flex" : "none";
+  document.getElementById("auto-push-badge").style.display = has ? "inline" : "none";
+  document.getElementById("sync-status").textContent = has
+    ? `${state.entries.filter(e=>e.pushed).length} pushed · ${state.entries.filter(e=>!e.pushed).length} pending`
+    : "No webhook connected";
+  if (state.webhookUrl) document.getElementById("webhook-input").value = state.webhookUrl;
+  const unpushed = state.entries.filter(e=>!e.pushed).length;
+  const pushBtn = document.getElementById("push-all-btn");
+  pushBtn.style.display = (has && unpushed > 0) ? "block" : "none";
+  pushBtn.textContent = `Push ${unpushed} unpushed`;
+}
+updateWebhookUI();
+
+async function pushToSheets(rows) {
+  if (!state.webhookUrl || !rows.length) return false;
+  setWsStatus("pushing");
+  try {
+    const res = await fetch(state.webhookUrl, { method:"POST", headers:{"Content-Type":"text/plain"}, body: JSON.stringify({ rows }) });
+    const data = await res.json();
+    if (data.success) { setWsStatus("success", `✓ ${data.added} row(s) pushed to Sheet`); return true; }
+    throw new Error();
+  } catch { setWsStatus("error", "Push failed — check your webhook URL"); return false; }
+}
+
+function setWsStatus(s, msg="") {
+  state.webhookStatus = s;
+  const dot = document.getElementById("ws-dot"), lbl = document.getElementById("ws-label"), badge = document.getElementById("ws-badge");
+  const msgEl = document.getElementById("wh-msg");
+  if (s==="pushing") { dot.style.background="#eab308"; lbl.textContent="Pushing…"; badge.style.background="#fefce8"; badge.style.color="#854d0e"; }
+  else if (s==="success") { dot.style.background="#22c55e"; lbl.textContent="Connected"; badge.style.background="#f0fdf4"; badge.style.color="#16a34a"; }
+  else if (s==="error") { dot.style.background="#ef4444"; lbl.textContent="Error"; badge.style.background="#fef2f2"; badge.style.color="#b91c1c"; }
+  else { dot.style.background="#22c55e"; lbl.textContent="Connected"; badge.style.background="#f0fdf4"; badge.style.color="#16a34a"; }
+  if (msg) { msgEl.textContent=msg; msgEl.style.display="block"; msgEl.style.background=s==="error"?"#fef2f2":"#f0fdf4"; msgEl.style.color=s==="error"?"#b91c1c":"#15803d"; msgEl.style.border=s==="error"?"1px solid #fecaca":"1px solid #bbf7d0"; setTimeout(()=>{ msgEl.style.display="none"; state.webhookStatus="idle"; updateWebhookUI(); },4000); }
+}
+
+// ── Add serials ───────────────────────────────────────────────────
+async function addSerials(raw) {
+  const serials = raw.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean);
+  if (!serials.length) return;
+  const ts = new Date().toLocaleString();
+  const existing = new Set(state.entries.map(e=>e.serial));
+  const newUnique = serials.filter(s=>!existing.has(s)).map(serial=>({ serial, city:state.city, motorType:state.motorType, location:state.location, failures:state.failures.join(" + "), timestamp:ts, pushed:false }));
+  const dups = serials.length - newUnique.length;
+  if (dups > 0) toast(`${newUnique.length} added, ${dups} duplicate(s) skipped`, "warn");
+  else toast(`✓ ${newUnique.length} serial(s) added`);
+  state.entries.push(...newUnique);
+  renderEntries(); renderDashboard(); updateWebhookUI();
+  if (state.webhookUrl && newUnique.length) {
+    const ok = await pushToSheets(newUnique);
+    if (ok) { newUnique.forEach(n => { const e = state.entries.find(e=>e.serial===n.serial); if(e) e.pushed=true; }); renderEntries(); renderDashboard(); updateWebhookUI(); }
+  }
+}
+
+function addSerialsFromInput() { const v = document.getElementById("serial-input").value; if(v.trim()) { addSerials(v); document.getElementById("serial-input").value=""; } }
+function handleEnter(e) { if(e.key==="Enter" && !e.shiftKey) { e.preventDefault(); addSerialsFromInput(); } }
+
+async function pushAll() {
+  const unpushed = state.entries.filter(e=>!e.pushed);
+  if (!unpushed.length) return;
+  const ok = await pushToSheets(unpushed);
+  if (ok) { state.entries.forEach(e=>e.pushed=true); renderEntries(); renderDashboard(); updateWebhookUI(); }
+}
+
+// ── Camera ────────────────────────────────────────────────────────
+async function startCamera() {
+  document.getElementById("cam-error").style.display="none";
+  if (!window.jsQR) { document.getElementById("cam-error").textContent="QR library not loaded yet. Please wait a moment."; document.getElementById("cam-error").style.display="block"; return; }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ideal:"environment"}, width:{ideal:1280}, height:{ideal:720} } });
+    const video = document.getElementById("video");
+    video.srcObject = stream; await video.play();
+    document.getElementById("camera-inactive").style.display="none";
+    document.getElementById("camera-active").style.display="block";
+    rafId = requestAnimationFrame(scanFrame);
+  } catch(e) {
+    document.getElementById("cam-error").textContent="Camera access denied. Grant permission in browser settings.";
+    document.getElementById("cam-error").style.display="block";
+  }
+}
+
+function stopCamera() {
+  if (stream) { stream.getTracks().forEach(t=>t.stop()); stream=null; }
+  if (rafId) { cancelAnimationFrame(rafId); rafId=null; }
+  document.getElementById("camera-inactive").style.display="block";
+  document.getElementById("camera-active").style.display="none";
+  document.getElementById("scan-result").style.display="none";
+}
+
+function scanFrame() {
+  const video = document.getElementById("video"), canvas = document.getElementById("canvas");
+  if (video.readyState !== video.HAVE_ENOUGH_DATA) { rafId=requestAnimationFrame(scanFrame); return; }
+  canvas.width=video.videoWidth; canvas.height=video.videoHeight;
+  const ctx=canvas.getContext("2d"); ctx.drawImage(video,0,0,canvas.width,canvas.height);
+  const imgData=ctx.getImageData(0,0,canvas.width,canvas.height);
+  const code=window.jsQR(imgData.data,imgData.width,imgData.height,{inversionAttempts:"dontInvert"});
+  if (code?.data) {
+    const now=Date.now();
+    if (code.data!==lastCode || now-lastCodeTime>2000) {
+      lastCode=code.data; lastCodeTime=now;
+      const sr=document.getElementById("scan-result"); sr.textContent="✓ "+code.data; sr.style.display="block";
+      addSerials(code.data);
+    }
+  }
+  rafId=requestAnimationFrame(scanFrame);
+}
+
+// ── Render entries ────────────────────────────────────────────────
+function renderEntries() {
+  const n=state.entries.length;
+  document.getElementById("entry-count").textContent=n;
+  document.getElementById("count-badge").textContent=n+" logged";
+  document.getElementById("entries-empty").style.display=n===0?"block":"none";
+  document.getElementById("entries-list-wrap").style.display=n===0?"none":"block";
+  document.getElementById("entries-count-label").textContent=n+" entries";
+  const list=document.getElementById("entries-list"); list.innerHTML="";
+  [...state.entries].reverse().forEach((e,i)=>{
+    const idx=state.entries.length-1-i;
+    const row=document.createElement("div");
+    row.style.cssText="display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid #f9fafb;";
+    row.innerHTML=`<div style="width:8px;height:8px;border-radius:50%;background:${e.pushed?"#4ade80":"#fbbf24"};flex-shrink:0;"></div>
+      <span style="font-family:monospace;font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${e.serial}</span>
+      <span class="badge" style="${CITY_BADGE[e.city]||'background:#f3f4f6;color:#374151'}">${e.city}</span>
+      <span class="badge" style="${TYPE_BADGE[e.motorType]||'background:#f3f4f6;color:#374151'}">${e.motorType}</span>
+      <span class="badge" style="${LOC_BADGE[e.location]||'background:#f3f4f6;color:#374151'}">${e.location}</span>
+      <button onclick="removeEntry(${idx})" style="background:none;border:none;color:#d1d5db;font-size:18px;cursor:pointer;line-height:1;padding:0 2px;">×</button>`;
+    list.appendChild(row);
+  });
+}
+
+function removeEntry(idx) { state.entries.splice(idx,1); renderEntries(); renderDashboard(); updateWebhookUI(); }
+function clearAll() { if(confirm("Clear all entries?")) { state.entries=[]; renderEntries(); renderDashboard(); updateWebhookUI(); } }
+
+// ── Dashboard ─────────────────────────────────────────────────────
+function barChart(container, data, colorMap, title) {
+  const max=Math.max(...data.map(d=>d.v),1);
+  let html=`<p style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;margin:0 0 12px;">${title}</p>`;
+  data.forEach((d,i)=>{
+    const color=colorMap?colorMap[d.k]:FAIL_CLR[i%FAIL_CLR.length];
+    html+=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+      <span style="font-size:12px;color:#6b7280;width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:0;">${d.k}</span>
+      <div class="bar-wrap"><div class="bar-fill" style="width:${(d.v/max)*100}%;background:${color||'#6366f1'};"></div></div>
+      <span style="font-size:12px;font-weight:700;color:#374151;width:20px;text-align:right;">${d.v}</span>
+    </div>`;
+  });
+  document.getElementById(container).innerHTML=html;
+}
+
+function donutChart(container, data, colors, title) {
+  const total=data.reduce((s,d)=>s+d.v,0); if(!total){document.getElementById(container).innerHTML="";return;}
+  const r=40,cx=50,cy=50,circ=2*Math.PI*r; let off=0;
+  let slices=""; let legend="";
+  data.forEach((d,i)=>{
+    const pct=d.v/total, dash=pct*circ, gap=circ-dash;
+    slices+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${colors[i%colors.length]}" stroke-width="18" stroke-dasharray="${dash} ${gap}" stroke-dashoffset="${-off*circ}" style="transition:all .5s"/>`;
+    off+=pct;
+    legend+=`<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;"><div class="dot" style="background:${colors[i%colors.length]};"></div><span style="font-size:12px;color:#4b5563;flex:1;">${d.k}</span><span style="font-size:12px;font-weight:700;color:#111827;">${d.v}</span></div>`;
+  });
+  document.getElementById(container).innerHTML=`
+    <p style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;margin:0 0 10px;">${title}</p>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <svg viewBox="0 0 100 100" class="donut" style="width:80px;height:80px;flex-shrink:0;">
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#f3f4f6" stroke-width="18"/>
+        ${slices}
+      </svg>
+      <div style="flex:1;">${legend}</div>
+    </div>`;
+}
+
+function renderDashboard() {
+  const e=state.entries; const n=e.length;
+  document.getElementById("dash-empty").style.display=n===0?"block":"none";
+  document.getElementById("dash-content").style.display=n===0?"none":"block";
+  if(!n) return;
+  const pushed=e.filter(x=>x.pushed).length, pending=n-pushed;
+  document.getElementById("kpi-total").textContent=n;
+  document.getElementById("kpi-pushed").textContent=pushed;
+  document.getElementById("kpi-pending").textContent=pending;
+  const pc=document.getElementById("kpi-pending-card");
+  pc.style.background=pending>0?"#f59e0b":"#f3f4f6"; pc.style.color=pending>0?"#fff":"#6b7280";
+
+  barChart("chart-city", CITIES.map(k=>({k,v:e.filter(x=>x.city===k).length})).filter(d=>d.v), CITY_CLR, "By City");
+  donutChart("chart-type", MOTOR_TYPES.map(k=>({k,v:e.filter(x=>x.motorType===k).length})).filter(d=>d.v), ["#111827","#06b6d4"], "Motor Type");
+  donutChart("chart-loc", LOCATIONS.map(k=>({k,v:e.filter(x=>x.location===k).length})).filter(d=>d.v), Object.values(LOC_CLR), "Location");
+  barChart("chart-fail", FAILURE_REASONS.map(k=>({k,v:e.filter(x=>x.failures.includes(k)).length})).filter(d=>d.v), null, "Failure Reasons");
+
+  const combos={}; e.forEach(x=>{combos[x.failures]=(combos[x.failures]||0)+1;});
+  const sorted=Object.entries(combos).sort((a,b)=>b[1]-a[1]).slice(0,3);
+  const combWrap=document.getElementById("chart-combos");
+  if(sorted.length>1){
+    combWrap.style.display="block";
+    let html=`<p style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;margin:0 0 12px;">Top Failure Combos</p>`;
+    sorted.forEach(([k,v],i)=>{ html+=`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f9fafb;"><div style="display:flex;align-items:center;gap:8px;"><span style="font-size:11px;font-weight:700;color:#9ca3af;width:20px;">#${i+1}</span><span style="font-size:12px;color:#374151;">${k}</span></div><span style="font-size:11px;font-weight:700;background:#f3f4f6;color:#374151;padding:2px 8px;border-radius:999px;">${v}</span></div>`; });
+    combWrap.innerHTML=html;
+  } else { combWrap.style.display="none"; }
+
+  const recEl=document.getElementById("chart-recent");
+  let rhtml=`<p style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;margin:0 0 12px;">Recent Scans</p>`;
+  [...e].reverse().slice(0,5).forEach(x=>{
+    rhtml+=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+      <div style="width:8px;height:8px;border-radius:50%;background:${x.pushed?"#4ade80":"#fbbf24"};flex-shrink:0;"></div>
+      <span style="font-family:monospace;font-size:12px;color:#111827;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${x.serial}</span>
+      <span class="badge" style="${CITY_BADGE[x.city]||''}">${x.city}</span>
+      <span class="badge" style="${LOC_BADGE[x.location]||''}">${x.location}</span>
+    </div>`;
+  });
+  recEl.innerHTML=rhtml;
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────
+function switchTab(t) {
+  ["scan","dashboard","entries"].forEach(id=>{
+    document.getElementById("tab-"+id+"-panel").style.display=id===t?"block":"none";
+    document.getElementById("tab-"+id).classList.toggle("on",id===t);
+  });
+  if(t==="dashboard") renderDashboard();
+}
+
+// ── Setup panel ───────────────────────────────────────────────────
+function toggleSetup() {
+  const p=document.getElementById("setup-panel");
+  const showing=p.style.display!=="none";
+  p.style.display=showing?"none":"block";
+  document.getElementById("setup-btn").textContent=showing?"Setup":"Hide";
+}
+
+function copyScript() {
+  navigator.clipboard.writeText(SCRIPT);
+  const b=document.getElementById("copy-btn"); b.textContent="Copied!"; b.style.background="#22c55e"; b.style.color="#fff";
+  setTimeout(()=>{ b.textContent="Copy"; b.style.background="#374151"; b.style.color="#e5e7eb"; },2000);
+}
+
+// ── Export CSV ────────────────────────────────────────────────────
+function exportCSV() {
+  const h=["Serial Number","City","Motor Type","Location","Failure Reasons","Timestamp"];
+  const rows=state.entries.map(e=>[e.serial,e.city,e.motorType,e.location,e.failures,e.timestamp]);
+  const csv=[h,...rows].map(r=>r.map(c=>`"${c}"`).join(",")).join("\n");
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download=`faulty_motors_${Date.now()}.csv`; a.click();
+}
+
+// ── Toast ─────────────────────────────────────────────────────────
+function toast(msg, type="ok") {
+  const t=document.getElementById("toast"); t.textContent=msg;
+  t.style.background=type==="warn"?"#f59e0b":"#111827"; t.style.display="block";
+  setTimeout(()=>t.style.display="none",2800);
+}
+
+renderEntries(); renderDashboard();
+</script>
+</body>
+</html>
