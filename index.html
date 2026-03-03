@@ -190,6 +190,17 @@
         <button id="push-all-btn" onclick="pushAll()" style="display:none;font-size:12px;font-weight:700;padding:8px 14px;background:#16a34a;color:#fff;border:none;border-radius:10px;cursor:pointer;">Push unpushed</button>
       </div>
       <button class="btn-outline" onclick="exportCSV()">↓ Download CSV</button>
+      <!-- Always-visible webhook URL editor -->
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid #f3f4f6;">
+        <label style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;">Webhook URL</label>
+        <div style="display:flex;gap:8px;margin-top:6px;">
+          <input type="url" id="webhook-inline" placeholder="https://script.google.com/macros/s/.../exec"
+            style="flex:1;font-size:11px;padding:8px 10px;"
+            oninput="saveWebhook(this.value)"/>
+          <button onclick="testWebhook()" style="padding:8px 12px;background:#f3f4f6;border:none;border-radius:10px;font-size:11px;font-weight:700;color:#374151;cursor:pointer;white-space:nowrap;" id="test-btn">Test</button>
+        </div>
+        <p id="webhook-inline-status" style="font-size:11px;margin:5px 0 0;display:none;"></p>
+      </div>
     </div>
 
     <div id="entries-empty" style="text-align:center;padding:60px 0;color:#9ca3af;display:none;">
@@ -364,7 +375,42 @@ async function addSerials(raw) {
   if (dups > 0) toast(`${newUnique.length} added, ${dups} duplicate(s) skipped`, "warn");
   else toast(`✓ ${newUnique.length} serial(s) added`);
   state.entries.push(...newUnique);
-  renderEntries(); renderDashboard(); updateWebhookUI();
+  // Populate inline webhook box on load
+(function() {
+  const el = document.getElementById("webhook-inline");
+  if (el && state.webhookUrl) el.value = state.webhookUrl;
+})();
+
+const _origSaveWebhook = saveWebhook;
+function saveWebhook(val) {
+  state.webhookUrl = val;
+  localStorage.setItem("webhook_url", val);
+  // Sync both inputs
+  const a = document.getElementById("webhook-input");
+  const b = document.getElementById("webhook-inline");
+  if (a && a.value !== val) a.value = val;
+  if (b && b.value !== val) b.value = val;
+  document.getElementById("wh-saved") && (document.getElementById("wh-saved").style.display = val ? "block" : "none");
+  updateWebhookUI();
+}
+
+async function testWebhook() {
+  const btn = document.getElementById("test-btn");
+  const status = document.getElementById("webhook-inline-status");
+  if (!state.webhookUrl) { status.textContent = "⚠️ Paste a URL first"; status.style.color="#f59e0b"; status.style.display="block"; return; }
+  btn.textContent = "Testing…"; btn.disabled = true;
+  try {
+    const form = new FormData();
+    form.append("data", JSON.stringify({ rows: [{ serial:"TEST-001", city:"BLR", motorType:"Solid", location:"YCs", failures:"Test", timestamp: new Date().toLocaleString() }] }));
+    await fetch(state.webhookUrl, { method:"POST", mode:"no-cors", body: form });
+    status.textContent = "✓ Connected! Check your sheet for a TEST-001 row.";
+    status.style.color = "#16a34a"; status.style.display = "block";
+  } catch(e) {
+    status.textContent = "✗ Failed — check the URL and try again.";
+    status.style.color = "#ef4444"; status.style.display = "block";
+  }
+  btn.textContent = "Test"; btn.disabled = false;
+} updateWebhookUI();
   if (state.webhookUrl && newUnique.length) {
     const ok = await pushToSheets(newUnique);
     if (ok) { newUnique.forEach(n => { const e = state.entries.find(e=>e.serial===n.serial); if(e) e.pushed=true; }); renderEntries(); renderDashboard(); updateWebhookUI(); }
