@@ -320,14 +320,10 @@ async function pushToSheets(rows) {
   if (!state.webhookUrl || !rows.length) return false;
   setWsStatus("pushing");
   try {
-    // Send as form-encoded so Apps Script receives it reliably under no-cors
-    const form = new FormData();
-    form.append("data", JSON.stringify({ rows }));
-    await fetch(state.webhookUrl, {
-      method: "POST",
-      mode: "no-cors",
-      body: form
-    });
+    // Use GET with URL-encoded data — works reliably on Android Chrome with no-cors
+    const encoded = encodeURIComponent(JSON.stringify({ rows }));
+    const url = state.webhookUrl + "?data=" + encoded;
+    await fetch(url, { method: "GET", mode: "no-cors" });
     setWsStatus("success", `✓ ${rows.length} row(s) pushed to Sheet`);
     return true;
   } catch(err) {
@@ -400,10 +396,11 @@ async function testWebhook() {
   if (!state.webhookUrl) { status.textContent = "⚠️ Paste a URL first"; status.style.color="#f59e0b"; status.style.display="block"; return; }
   btn.textContent = "Testing…"; btn.disabled = true;
   try {
-    const form = new FormData();
-    form.append("data", JSON.stringify({ rows: [{ serial:"TEST-001", city:"BLR", motorType:"Solid", location:"YCs", failures:"Test", timestamp: new Date().toLocaleString() }] }));
-    await fetch(state.webhookUrl, { method:"POST", mode:"no-cors", body: form });
-    status.textContent = "✓ Connected! Check your sheet for a TEST-001 row.";
+    const testRow = [{ serial:"TEST-001", city:"BLR", motorType:"Solid", location:"YCs", failures:"Test", timestamp: new Date().toLocaleString() }];
+    const encoded = encodeURIComponent(JSON.stringify({ rows: testRow }));
+    const url = state.webhookUrl + "?data=" + encoded;
+    await fetch(url, { method: "GET", mode: "no-cors" });
+    status.textContent = "✓ Sent! Check your sheet for a TEST-001 row.";
     status.style.color = "#16a34a"; status.style.display = "block";
   } catch(e) {
     status.textContent = "✗ Failed — check the URL and try again.";
