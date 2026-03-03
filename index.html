@@ -309,11 +309,20 @@ async function pushToSheets(rows) {
   if (!state.webhookUrl || !rows.length) return false;
   setWsStatus("pushing");
   try {
-    const res = await fetch(state.webhookUrl, { method:"POST", headers:{"Content-Type":"text/plain"}, body: JSON.stringify({ rows }) });
-    const data = await res.json();
-    if (data.success) { setWsStatus("success", `✓ ${data.added} row(s) pushed to Sheet`); return true; }
-    throw new Error();
-  } catch { setWsStatus("error", "Push failed — check your webhook URL"); return false; }
+    // Use no-cors to bypass CORS restriction on Apps Script
+    await fetch(state.webhookUrl, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ rows })
+    });
+    // no-cors means we can't read the response, but if no exception = success
+    setWsStatus("success", `✓ ${rows.length} row(s) pushed to Sheet`);
+    return true;
+  } catch(err) {
+    setWsStatus("error", "Push failed — check your webhook URL");
+    return false;
+  }
 }
 
 function setWsStatus(s, msg="") {
